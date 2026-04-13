@@ -57,7 +57,7 @@ app = FastAPI(title="HireBlind Enterprise API - EU AI Act Compliant")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -131,7 +131,7 @@ async def health_check():
         "status": "operational",
         "engines_loaded": {
             "spacy_nlp": anonymizer.nlp is not None,
-            "sentence_transformer": scoring_engine.model is not None,
+            "sentence_transformer": scoring_engine.is_model_loaded(),
             "supabase": supabase is not None
         },
         "compliance": "EU AI Act Arts. 5, 10, 12, 13, 14",
@@ -235,10 +235,18 @@ async def process_and_rank(request: ProcessRequest):
     # PHASE 2: Semantic Scoring
     # ==========================================
     
-    ranked_results, scoring_audit = scoring_engine.rank_candidates(
-        request.job_description, 
-        anonymized_payloads
-    )
+    try:
+        ranked_results, scoring_audit = scoring_engine.rank_candidates(
+            request.job_description,
+            anonymized_payloads
+        )
+    except Exception as exc:
+        logger.exception(f"Scoring engine failed for session {request.session_id}: {exc}")
+        ranked_results, scoring_audit = scoring_engine.fallback_rank_candidates(
+            request.job_description,
+            anonymized_payloads,
+            reason="runtime_error"
+        )
     
     logger.info(f"Scoring complete: {len(ranked_results)} candidates ranked")
     
