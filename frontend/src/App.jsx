@@ -953,7 +953,7 @@ function EmptyState({ onUpload }) {
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Upload resume batch</div>
         <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.6 }}>
-          PDF, DOCX, or TXT · Max 2MB per file · Up to 3 files<br />EU AI Act compliant processing
+          PDF, DOCX, or TXT · Max 2MB per file · Up to 100 files<br />EU AI Act compliant processing
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: "var(--sp-5)", flexWrap: "wrap" }}>
           {["PII Anonymized", "GDPR Compliant", "Bias Detection"].map(t => (
@@ -1324,7 +1324,7 @@ function MainApp() {
             <label className={`btn btn-primary${isUploading ? " btn-sm" : ""}`} style={{ cursor: isUploading ? "default" : "pointer" }}>
               {isUploading
                 ? <><Loader2 size={14} className="spin" /> Processing…</>
-                : <><Upload size={14} /> Upload Batch <span style={{ fontSize: 10, opacity: .65, fontWeight: 400 }}>(max 3)</span></>}
+                : <><Upload size={14} /> Upload Batch <span style={{ fontSize: 10, opacity: .65, fontWeight: 400 }}>(max 100)</span></>}
               <input type="file" multiple accept=".pdf,.docx,.txt" style={{ display: "none" }} onChange={handleFileUpload} disabled={isUploading} />
             </label>
             {Object.keys(uploadProgress).length > 0 && (

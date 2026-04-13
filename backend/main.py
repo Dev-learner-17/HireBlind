@@ -1,6 +1,6 @@
 # ==========================================
 # FILE: backend/main.py
-# FINAL VERSION - Professional Logging & Fixed Bias Call
+# FINAL VERSION - Professional Logging & Fixed Bias Call + Upload Limits
 # ==========================================
 
 import logging
@@ -116,6 +116,8 @@ def extract_text_from_file(file_path: str, filename: str) -> str:
 # API Endpoints
 # ==========================================
 
+MAX_FILES = 100 # 🔥 Added max file limit constant
+
 @app.get("/")
 async def root():
     return {
@@ -141,6 +143,11 @@ async def health_check():
 @app.post("/upload")
 async def upload_batch(files: List[UploadFile] = File(...)):
     """Upload resumes (PDF/DOCX/TXT) and create a processing session."""
+    
+    # 🔥 BACKEND LIMIT ADDED HERE
+    if len(files) > MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"Max {MAX_FILES} files allowed")
+
     extracted_data = []
     
     for file in files:
