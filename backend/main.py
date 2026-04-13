@@ -18,7 +18,7 @@ from docx import Document
 # ==========================================
 # LOGGING CONFIGURATION
 # ==========================================
-
+port = int(os.environ.get("PORT", 10000))
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
