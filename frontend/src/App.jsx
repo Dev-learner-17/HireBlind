@@ -1174,7 +1174,7 @@ function MainApp() {
       const fd = new FormData();
       files.forEach(f => fd.append("files", f));
 
-      const ur = await fetchWithRetry(`${API_BASE}/upload/`, { method: "POST", body: fd }, 3, 45000);
+      const ur = await fetchWithRetry(`${API_BASE}/upload`, { method: "POST", body: fd }, 3, 45000);
       if (!ur.ok) throw new Error(`Upload failed (${ur.status}) — please try again`);
       const ud = await ur.json();
 
@@ -1182,7 +1182,7 @@ function MainApp() {
       intervals.forEach(iv => clearInterval(iv));
       setUploadProgress(Object.fromEntries(files.map(f => [f.name, 100])));
 
-      const pr = await fetchWithRetry(`${API_BASE}/process/`, {
+      const pr = await fetchWithRetry(`${API_BASE}/process`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: ud.session_id, job_description: defaultJD }),
       }, 2, 60000);
