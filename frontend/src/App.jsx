@@ -1134,14 +1134,14 @@ function MainApp() {
     try {
       const fd = new FormData();
       files.forEach(f => fd.append("files", f));
-      const ur = await fetch(`${API_BASE}/upload`, { method: "POST", body: fd });
+      const ur = await fetch(`${API_BASE}/upload/`, { method: "POST", body: fd });
       if (!ur.ok) throw new Error(`Upload failed: ${ur.status}`);
       const ud = await ur.json();
 
       intervals.forEach(iv => clearInterval(iv));
       setUploadProgress(Object.fromEntries(files.map(f => [f.name, 100])));
 
-      const pr = await fetch(`${API_BASE}/process`, {
+      const pr = await fetch(`${API_BASE}/process/`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: ud.session_id, job_description: defaultJD }),
       });
