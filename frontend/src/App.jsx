@@ -16,7 +16,38 @@ import {
   ArrowRight, MoreHorizontal, Layers, Command
 } from "lucide-react";
 
-const API_BASE = "https://devkhandelwal17-hireblind-backend.hf.space";
+const API_BASE = import.meta.env?.VITE_API_URL || "https://devkhandelwal17-hireblind-backend.hf.space";
+
+// ─────────────────────────────────────────────────────────────
+// FETCH WITH RETRY + TIMEOUT
+// ─────────────────────────────────────────────────────────────
+async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs = 30000) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (err) {
+      clearTimeout(timer);
+      const isLast = attempt === retries;
+      if (err.name === "AbortError") {
+        if (isLast) throw new Error("Request timed out — the server may still be waking up. Please try again.");
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+      if (isLast) {
+        if (err.message === "Failed to fetch") {
+          throw new Error("Cannot reach server — it may be waking up (cold start). Retrying automatically…");
+        }
+        throw err;
+      }
+      // Exponential backoff before retry
+      await new Promise(r => setTimeout(r, 1200 * Math.pow(1.8, attempt)));
+    }
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 // FONT INJECTION
@@ -922,7 +953,7 @@ function EmptyState({ onUpload }) {
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Upload resume batch</div>
         <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.6 }}>
-          PDF, DOCX, or TXT · Max 5MB per file<br />EU AI Act compliant processing
+          PDF, DOCX, or TXT · Max 2MB per file · Up to 3 files<br />EU AI Act compliant processing
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: "var(--sp-5)", flexWrap: "wrap" }}>
           {["PII Anonymized", "GDPR Compliant", "Bias Detection"].map(t => (
@@ -1109,11 +1140,14 @@ function MainApp() {
 
   // ── File upload ──
   const handleFileUpload = async (e) => {
-    const files = Array.from(e.target.files || []);
+    const files = Array.from(e.target.files || []).slice(0, 3); // limit to 3 files
     if (!files.length) return;
 
-    const oversized = files.filter(f => f.size > 5 * 1024 * 1024);
-    if (oversized.length) { addToast({ type: "error", title: "File too large", message: `${oversized.length} file(s) exceed 5MB limit` }); return; }
+    const oversized = files.filter(f => f.size > 2 * 1024 * 1024);
+    if (oversized.length) {
+      addToast({ type: "error", title: "File too large", message: `${oversized.map(f => f.name).join(", ")} exceed 2MB limit` });
+      return;
+    }
     const badType = files.filter(f => !f.name.match(/\.(pdf|docx|txt)$/i));
     if (badType.length) { addToast({ type: "error", title: "Unsupported format", message: "Use PDF, DOCX, or TXT only" }); return; }
 
@@ -1123,29 +1157,36 @@ function MainApp() {
     const initProg = Object.fromEntries(files.map(f => [f.name, 0]));
     setUploadProgress(initProg);
 
+    // Show warm-up notice after 2s if still loading
+    const warmupTimer = setTimeout(() => {
+      addToast({ type: "info", title: "Server waking up…", message: "HuggingFace cold start detected. Hang tight — retrying automatically." });
+    }, 2000);
+
     const intervals = files.map(f => {
       let p = 0;
       return setInterval(() => {
-        p = Math.min(p + 18, 90);
+        p = Math.min(p + 8, 85);
         setUploadProgress(prev => ({ ...prev, [f.name]: p }));
-      }, 180);
+      }, 300);
     });
 
     try {
       const fd = new FormData();
       files.forEach(f => fd.append("files", f));
-      const ur = await fetch(`${API_BASE}/upload/`, { method: "POST", body: fd });
-      if (!ur.ok) throw new Error(`Upload failed: ${ur.status}`);
+
+      const ur = await fetchWithRetry(`${API_BASE}/upload/`, { method: "POST", body: fd }, 3, 45000);
+      if (!ur.ok) throw new Error(`Upload failed (${ur.status}) — please try again`);
       const ud = await ur.json();
 
+      clearTimeout(warmupTimer);
       intervals.forEach(iv => clearInterval(iv));
       setUploadProgress(Object.fromEntries(files.map(f => [f.name, 100])));
 
-      const pr = await fetch(`${API_BASE}/process/`, {
+      const pr = await fetchWithRetry(`${API_BASE}/process/`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: ud.session_id, job_description: defaultJD }),
-      });
-      if (!pr.ok) throw new Error(`Processing failed: ${pr.status}`);
+      }, 2, 60000);
+      if (!pr.ok) throw new Error(`Processing failed (${pr.status}) — server may be overloaded`);
       const pd = await pr.json();
 
       setCandidates(pd.candidates || []);
@@ -1155,8 +1196,16 @@ function MainApp() {
       setCompareIds([]);
       addToast({ type: "success", title: "Batch processed", message: `${pd.candidates?.length || 0} candidates ranked successfully` });
     } catch (err) {
+      clearTimeout(warmupTimer);
       intervals.forEach(iv => clearInterval(iv));
-      addToast({ type: "error", title: "Processing failed", message: err.message });
+      const isNetworkErr = err.message.includes("fetch") || err.message.includes("waking up") || err.message.includes("timed out");
+      addToast({
+        type: "error",
+        title: isNetworkErr ? "Server waking up" : "Processing failed",
+        message: isNetworkErr
+          ? "The backend is cold-starting. Wait 15–30 seconds and try again."
+          : err.message,
+      });
     } finally {
       setIsUploading(false);
       setIsLoading(false);
@@ -1168,7 +1217,7 @@ function MainApp() {
   const handleOverrideConfirm = async (newRank, reason) => {
     setIsOverriding(true);
     try {
-      const res = await fetch(`${API_BASE}/override`, {
+      const res = await fetchWithRetry(`${API_BASE}/override`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ candidate_id: overrideTarget.id, old_rank: overrideTarget.rank, new_rank: parseInt(newRank), reason }),
       });
@@ -1184,7 +1233,17 @@ function MainApp() {
     }
   };
 
-  // ── Login gate ──
+  // Cold-start banner state
+  const [showWarmupBanner, setShowWarmupBanner] = useState(false);
+  useEffect(() => {
+    let t;
+    if (isUploading) {
+      t = setTimeout(() => setShowWarmupBanner(true), 5000);
+    } else {
+      setShowWarmupBanner(false);
+    }
+    return () => clearTimeout(t);
+  }, [isUploading]);
   if (!isAuthenticated) {
     return <LoginScreen onLogin={(u) => { setIsAuthenticated(true); setRole(u.role); }} />;
   }
@@ -1203,6 +1262,23 @@ function MainApp() {
       <div className="toast-container">
         {toasts.map(t => <Toast key={t.id} {...t} onDismiss={removeToast} />)}
       </div>
+
+      {/* ── COLD START BANNER ── */}
+      {showWarmupBanner && (
+        <div className="fade-in" style={{
+          background: "linear-gradient(90deg, rgba(245,158,11,0.12), rgba(99,102,241,0.08))",
+          borderBottom: "1px solid rgba(245,158,11,0.25)",
+          padding: "10px var(--sp-6)",
+          display: "flex", alignItems: "center", gap: "var(--sp-3)",
+          fontSize: 12, color: "var(--amber)",
+        }}>
+          <Loader2 size={13} className="spin" style={{ flexShrink: 0 }} />
+          <span>
+            <strong>HuggingFace cold start detected</strong> — the model is loading (first request takes 15–30s).
+            Auto-retrying in the background. Please wait…
+          </span>
+        </div>
+      )}
 
       {/* ── HEADER ── */}
       <header style={{
@@ -1246,7 +1322,9 @@ function MainApp() {
           {/* Upload */}
           <div style={{ position: "relative" }}>
             <label className={`btn btn-primary${isUploading ? " btn-sm" : ""}`} style={{ cursor: isUploading ? "default" : "pointer" }}>
-              {isUploading ? <><Loader2 size={14} className="spin" /> Processing...</> : <><Upload size={14} /> Upload Batch</>}
+              {isUploading
+                ? <><Loader2 size={14} className="spin" /> Processing…</>
+                : <><Upload size={14} /> Upload Batch <span style={{ fontSize: 10, opacity: .65, fontWeight: 400 }}>(max 3)</span></>}
               <input type="file" multiple accept=".pdf,.docx,.txt" style={{ display: "none" }} onChange={handleFileUpload} disabled={isUploading} />
             </label>
             {Object.keys(uploadProgress).length > 0 && (
@@ -1331,6 +1409,9 @@ function MainApp() {
           <div style={{ flex: 1, overflowY: "auto", padding: "var(--sp-3)" }}>
             {isLoading ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-3)" }}>
+                <div style={{ padding: "var(--sp-3) var(--sp-4)", borderRadius: "var(--r-lg)", background: "var(--accent-dim)", border: "1px solid rgba(99,102,241,.15)", fontSize: 11, color: "var(--accent-light)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <Loader2 size={11} className="spin" /> Ranking candidates — model loading may take up to 30s on first run…
+                </div>
                 {[1,2,3].map(i => <SkeletonCard key={i} />)}
               </div>
             ) : paginated.length === 0 && candidates.length === 0 ? (
