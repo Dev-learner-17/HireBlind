@@ -1140,7 +1140,7 @@ function MainApp() {
 
   // ── File upload ──
   const handleFileUpload = async (e) => {
-    const files = Array.from(e.target.files || []).slice(0, 3); // limit to 3 files
+    const files = Array.from(e.target.files || []).slice(0, 100); // limit to 100 files
     if (!files.length) return;
 
     const oversized = files.filter(f => f.size > 2 * 1024 * 1024);
